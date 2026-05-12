@@ -1,5 +1,5 @@
 pytest
 requests
 python-dotenv
-gradio>=4.0.0
+gradio>=5.0.0
 mutagen
