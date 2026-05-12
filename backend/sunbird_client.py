@@ -77,11 +77,14 @@ def summarise_text(text: str) -> str:
 
     if "output" in data and isinstance(data["output"], dict):
         return (
-            data["output"].get("summary")
+            data["output"].get("summarized_text")
+            or data["output"].get("summary")
             or data["output"].get("text")
             or data["output"].get("response")
             or str(data["output"])
         )
+    if "summarized_text" in data:
+        return data["summarized_text"]
     if "summary" in data:
         return data["summary"]
     if "response" in data:
@@ -143,7 +146,7 @@ def synthesise_speech(text: str, language_code: str) -> str:
         "response_mode": "url",
     }
 
-    response = requests.post(url, json=payload, headers=headers, timeout=60)
+    response = requests.post(url, json=payload, headers=headers, timeout=120)
     response.raise_for_status()
     data = response.json()
 
