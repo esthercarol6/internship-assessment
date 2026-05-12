@@ -19,11 +19,11 @@ LANGUAGE_CODES = {
 
 # Speaker IDs for TTS per language
 TTS_SPEAKER_IDS = {
-    "lug": 248,  # Luganda - Female
-    "nyn": 243,  # Runyankole - Female
-    "teo": 242,  # Ateso - Female
-    "lgg": 245,  # Lugbara - Female
-    "ach": 241,  # Acholi - Female
+    "lug": 248,  # Luganda
+    "nyn": 243,  # Runyankole
+    "teo": 242,  # Ateso
+    "lgg": 245,  # Lugbara
+    "ach": 241,  # Acholi
 }
 
 
@@ -52,12 +52,19 @@ def transcribe_audio(audio_path: str) -> str:
 
     response.raise_for_status()
     data = response.json()
-    return data["output"]["text"]
+
+    if "output" in data and isinstance(data["output"], dict):
+        return data["output"].get("text") or data["output"].get("transcription") or str(data["output"])
+    if "text" in data:
+        return data["text"]
+    if "transcription" in data:
+        return data["transcription"]
+    return str(data)
 
 
 def summarise_text(text: str) -> str:
     """
-    Summarise text using the Sunbird /tasks/summarise endpoint.
+    Summarise text using the Sunbird summarise endpoint.
     Endpoint: POST /tasks/summarise
     """
     url = f"{BASE_URL}/tasks/summarise"
@@ -67,16 +74,32 @@ def summarise_text(text: str) -> str:
     response = requests.post(url, json=payload, headers=headers, timeout=60)
     response.raise_for_status()
     data = response.json()
-    return data["output"]["summary"]
+
+    if "output" in data and isinstance(data["output"], dict):
+        return (
+            data["output"].get("summary")
+            or data["output"].get("text")
+            or data["output"].get("response")
+            or str(data["output"])
+        )
+    if "summary" in data:
+        return data["summary"]
+    if "response" in data:
+        return data["response"]
+    if "text" in data:
+        return data["text"]
+    return str(data)
 
 
 def translate_text(text: str, target_language_code: str) -> str:
     """
     Translate text into a Ugandan local language using Sunflower simple inference.
     Endpoint: POST /tasks/sunflower_simple
+    Uses form-encoded data (not JSON).
+    Response: { "response": "...", "success": true, ... }
     """
     url = f"{BASE_URL}/tasks/sunflower_simple"
-    headers = {**_auth_headers(), "Content-Type": "application/json"}
+    headers = _auth_headers()
 
     language_names = {v: k for k, v in LANGUAGE_CODES.items()}
     lang_name = language_names.get(target_language_code, target_language_code)
@@ -85,32 +108,47 @@ def translate_text(text: str, target_language_code: str) -> str:
         f"Translate the following text into {lang_name}. "
         f"Return only the translated text, nothing else.\n\n{text}"
     )
-    payload = {"instruction": instruction}
 
-    response = requests.post(url, json=payload, headers=headers, timeout=60)
+    form_data = {
+        "instruction": instruction,
+        "model_type": "qwen",
+        "temperature": "0.3",
+    }
+
+    response = requests.post(url, data=form_data, headers=headers, timeout=60)
     response.raise_for_status()
     data = response.json()
 
-    # Simple inference returns output.response or output.content depending on model
-    output = data.get("output", {})
-    if isinstance(output, dict):
-        return output.get("response") or output.get("content") or str(output)
-    return str(output)
+    if "response" in data:
+        return data["response"]
+    if "output" in data and isinstance(data["output"], dict):
+        return data["output"].get("response") or data["output"].get("text") or str(data["output"])
+    return str(data)
 
 
 def synthesise_speech(text: str, language_code: str) -> str:
     """
     Convert translated text to audio using Sunbird TTS.
-    Returns a URL to the generated audio file.
-    Endpoint: POST /tasks/tts
+    Returns a signed URL to the generated audio file.
+    Endpoint: POST /tasks/modal/tts
+    Response: { "success": true, "audio_url": "...", ... }
     """
-    url = f"{BASE_URL}/tasks/tts"
+    url = f"{BASE_URL}/tasks/modal/tts"
     headers = {**_auth_headers(), "Content-Type": "application/json"}
 
     speaker_id = TTS_SPEAKER_IDS.get(language_code, 248)
-    payload = {"text": text, "speaker_id": speaker_id}
+    payload = {
+        "text": text,
+        "speaker_id": speaker_id,
+        "response_mode": "url",
+    }
 
     response = requests.post(url, json=payload, headers=headers, timeout=60)
     response.raise_for_status()
     data = response.json()
-    return data["output"]["audio_url"]
+
+    if "audio_url" in data:
+        return data["audio_url"]
+    if "output" in data and isinstance(data["output"], dict):
+        return data["output"].get("audio_url") or str(data["output"])
+    raise ValueError(f"Unexpected TTS response shape: {data}")
