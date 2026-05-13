@@ -36,10 +36,10 @@ def _auth_headers() -> dict:
 
 
 def transcribe_audio(audio_path: str) -> str:
+    """POST /tasks/stt"""
     url = f"{BASE_URL}/tasks/stt"
-    headers = _auth_headers()
     with open(audio_path, "rb") as f:
-        response = requests.post(url, files={"audio": f}, headers=headers, timeout=180)
+        response = requests.post(url, files={"audio": f}, headers=_auth_headers(), timeout=180)
     response.raise_for_status()
     data = response.json()
     if "output" in data and isinstance(data["output"], dict):
@@ -48,6 +48,7 @@ def transcribe_audio(audio_path: str) -> str:
 
 
 def summarise_text(text: str) -> str:
+    """POST /tasks/summarise"""
     url = f"{BASE_URL}/tasks/summarise"
     headers = {**_auth_headers(), "Content-Type": "application/json"}
     response = requests.post(url, json={"text": text}, headers=headers, timeout=120)
@@ -71,30 +72,48 @@ def summarise_text(text: str) -> str:
 
 
 def translate_text(text: str, target_language_code: str) -> str:
-    url = f"{BASE_URL}/tasks/sunflower_simple"
-    headers = _auth_headers()
+    """
+    POST /tasks/sunflower_inference
+    Uses the full chat inference endpoint (JSON, has built-in retry/backoff).
+    Response key: data["content"]
+    """
+    url = f"{BASE_URL}/tasks/sunflower_inference"
+    headers = {**_auth_headers(), "Content-Type": "application/json"}
+
     language_names = {v: k for k, v in LANGUAGE_CODES.items()}
     lang_name = language_names.get(target_language_code, target_language_code)
-    instruction = (
-        f"Translate the following text into {lang_name}. "
-        f"Return only the translated text, nothing else.\n\n{text}"
-    )
-    form_data = {
-        "instruction": instruction,
+
+    payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    f"Translate the following text into {lang_name}. "
+                    f"Return only the translated text, nothing else.\n\n{text}"
+                )
+            }
+        ],
         "model_type": "qwen",
-        "temperature": "0.3",
+        "temperature": 0.3,
+        "stream": False,
     }
-    response = requests.post(url, data=form_data, headers=headers, timeout=180)
+
+    response = requests.post(url, json=payload, headers=headers, timeout=120)
     response.raise_for_status()
     data = response.json()
+
+    # Response shape: { "content": "...", "model_type": "...", ... }
+    if "content" in data:
+        return data["content"]
     if "response" in data:
         return data["response"]
     if "output" in data and isinstance(data["output"], dict):
-        return data["output"].get("response") or data["output"].get("text") or str(data["output"])
+        return data["output"].get("content") or data["output"].get("response") or str(data["output"])
     return str(data)
 
 
 def synthesise_speech(text: str, language_code: str) -> str:
+    """POST /tasks/modal/tts"""
     url = f"{BASE_URL}/tasks/modal/tts"
     headers = {**_auth_headers(), "Content-Type": "application/json"}
     speaker_id = TTS_SPEAKER_IDS.get(language_code, 248)
